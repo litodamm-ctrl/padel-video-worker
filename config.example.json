@@ -1,0 +1,36 @@
+{
+  "_comentario": "Copia este archivo como config.json y completa los valores. config.json NO se sube a GitHub.",
+
+  "kv": {
+    "url": "https://padelmanagerb.netlify.app/.netlify/functions/kv",
+    "code": "PEGA-AQUI-EL-APP_PEDIDO_CODE"
+  },
+
+  "camaras": [
+    {
+      "id": "cam1",
+      "rtsp": "rtsp://usuario:clave@192.168.1.50:554/Streaming/Channels/101",
+      "canchas": ["Cancha 1", "Cancha 2"]
+    }
+  ],
+
+  "r2": {
+    "accountId": "ID-DE-CUENTA-CLOUDFLARE",
+    "accessKeyId": "ACCESS-KEY-DEL-TOKEN-R2",
+    "secretAccessKey": "SECRET-KEY-DEL-TOKEN-R2",
+    "bucket": "bahia-padel-videos",
+    "publicBaseUrl": "https://pub-XXXXXXXX.r2.dev"
+  },
+
+  "ffmpeg": "ffmpeg",
+  "carpetaGrabaciones": "grabaciones",
+  "carpetaSalida": "videos",
+  "segundosSegmento": 300,
+  "retencionHoras": 72,
+  "margenMinutos": 3,
+  "alto": 720,
+  "intervaloColaSeg": 60,
+  "intervaloLatidoSeg": 60,
+  "borrarSalidaTrasSubir": true,
+  "zonaHoraria": "America/Bogota"
+}
