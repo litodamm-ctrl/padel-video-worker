@@ -7,7 +7,7 @@ const { spawn, spawnSync } = require("child_process");
 const { parsearNombre, RE_NOMBRE } = require("./segmentos.js");
 
 function ffprobeDe(ffmpeg) {
-  // "C:\x\ffmpeg.exe" → "C:\x\ffprobe.exe"; "ffmpeg" → "ffprobe"
+  // "C:\\x\\ffmpeg.exe" → "C:\\x\\ffprobe.exe"; "ffmpeg" → "ffprobe"
   return String(ffmpeg || "ffmpeg").replace(/ffmpeg(\.exe)?$/i, (m, ext) => "ffprobe" + (ext || ""));
 }
 
@@ -54,7 +54,6 @@ async function listarSegmentos(dir, desde, hasta, opts) {
     if (!RE_NOMBRE.test(n)) continue;
     const inicio = parsearNombre(n);
     if (!inicio) continue;
-    // Solo los que pueden tocar el rango: empiezan antes de `hasta` y no más de un segmento antes de `desde`.
     if (inicio > hasta) continue;
     if (inicio.getTime() + (nominal + 60) * 1000 < desde.getTime()) continue;
     const ruta = path.join(dir, n);
@@ -65,7 +64,7 @@ async function listarSegmentos(dir, desde, hasta, opts) {
       if (cacheDur.has(k)) duracion = cacheDur.get(k);
       else { duracion = await duracionDe(ruta, ffmpeg); cacheDur.set(k, duracion); }
     } catch (e) {
-      continue; // archivo a medio escribir o corrupto: se omite (quedará como parcial)
+      continue;
     }
     if (!(duracion > 0.5)) continue;
     out.push({ ruta, inicio, duracion });
@@ -74,8 +73,20 @@ async function listarSegmentos(dir, desde, hasta, opts) {
   return out;
 }
 
+/* La cámara de Bahía está instalada invertida. Normalizamos todos los videos
+   girándolos 180° y añadimos una marca discreta en la parte inferior. */
+function filtroBahia(alto) {
+  const h = alto || 720;
+  return [
+    "hflip",
+    "vflip",
+    "scale=-2:" + h,
+    "drawtext=text='Bahía Padel Social Club':fontcolor=white@0.92:fontsize=28:box=1:boxcolor=black@0.42:boxborderw=10:x=(w-text_w)/2:y=h-text_h-24",
+  ].join(",");
+}
+
 /* Corta: concatena `archivos`, salta `offset` segundos y toma `duracion`.
-   Recodifica a H.264 720p (alto configurable) para que pese poco y se reproduzca en cualquier teléfono. */
+   Recodifica a H.264, corrige la orientación y agrega marca del club. */
 async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProgreso }) {
   const bin = ffmpeg || "ffmpeg";
   const lista = salida + ".lista.txt";
@@ -84,7 +95,7 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
     "-y", "-hide_banner", "-loglevel", "error", "-nostats",
     "-f", "concat", "-safe", "0", "-i", lista,
     "-ss", String(offset), "-t", String(duracion),
-    "-vf", "scale=-2:" + (alto || 720),
+    "-vf", filtroBahia(alto),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "96k",
     "-movflags", "+faststart",
@@ -110,4 +121,33 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
   return salida;
 }
 
-module.exports = { listarSegmentos, cortar, duracionDe, hayFfmpeg, ejecutar, ffprobeDe };
+/* Produce un clip corto a partir del video final ya corregido/marcado. Se
+   recodifica para que inicio y fin sean exactos incluso entre keyframes. */
+async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProgreso }) {
+  const bin = ffmpeg || "ffmpeg";
+  const args = [
+    "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+    "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion),
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+    "-progress", "pipe:1", salida,
+  ];
+  await new Promise((resolve, reject) => {
+    const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    let err = "";
+    p.stderr.on("data", d => { err += d; if (err.length > 20000) err = err.slice(-20000); });
+    p.stdout.on("data", d => {
+      if (!onProgreso) return;
+      const m = /out_time_ms=(\d+)/.exec(String(d));
+      if (m) onProgreso(Math.min(100, Math.round((+m[1] / 1e6) / duracion * 100)));
+    });
+    p.on("error", reject);
+    p.on("close", code => {
+      if (code === 0) resolve();
+      else reject(new Error("ffmpeg clip terminó con código " + code + ": " + err.trim().split("\n").slice(-3).join(" | ")));
+    });
+  });
+  return salida;
+}
+
+module.exports = { listarSegmentos, cortar, cortarClip, duracionDe, hayFfmpeg, ejecutar, ffprobeDe, filtroBahia };
