@@ -1,8 +1,8 @@
 /* Padel Video Worker · Bahía Padel
-   Tres tareas en un solo proceso:
-     1. Grabar cada cámara sin parar (segmentos de 5 min).
-     2. Cada minuto, revisar la cola pedido:* y producir los videos que ya terminaron.
-     3. Cada minuto, escribir worker:heartbeat para que el Panel sepa que está vivo. */
+   1. Graba cada cámara sin parar.
+   2. Procesa videos completos de reservas.
+   3. Procesa cortes cortos solicitados por jugadores.
+   4. Publica heartbeat para el Panel. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -10,10 +10,11 @@ const { cargarConfig, carpetaDeCancha } = require("./config.js");
 const { crearLog } = require("./log.js");
 const { crearKv } = require("./kv.js");
 const { crearGrabador, limpiarAntiguos } = require("./grabador.js");
-const { listarSegmentos, cortar, hayFfmpeg } = require("./cortador.js");
+const { listarSegmentos, cortar, cortarClip, hayFfmpeg } = require("./cortador.js");
 const { crearSubidor } = require("./subida.js");
 const { pendientes, aRegistro } = require("./cola.js");
 const { procesarPedido } = require("./procesar.js");
+const { procesarCorte } = require("./procesar-corte.js");
 
 const VERSION = require("../package.json").version;
 const RAIZ = path.join(__dirname, "..");
@@ -28,11 +29,11 @@ async function main() {
 
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   if (tz !== cfg.zonaHoraria) {
-    log.error(`La zona horaria de esta PC es "${tz}" y debe ser "${cfg.zonaHoraria}". Los cortes saldrían a la hora equivocada. Corrígela en Windows (Configuración → Hora e idioma) y reinicia el worker.`);
+    log.error(`La zona horaria de esta PC es "${tz}" y debe ser "${cfg.zonaHoraria}". Corrígela y reinicia el worker.`);
     process.exit(1);
   }
   if (!hayFfmpeg(cfg.ffmpeg)) {
-    log.error(`No encuentro ffmpeg ("${cfg.ffmpeg}"). Instálalo y pon la ruta completa en config.json → "ffmpeg".`);
+    log.error(`No encuentro ffmpeg ("${cfg.ffmpeg}").`);
     process.exit(1);
   }
 
@@ -40,7 +41,7 @@ async function main() {
   try {
     const a = await kv.auth();
     log.info(`Conectado al manager (modo ${a.modo || "?"})`);
-    if (a.modo === "admin") log.warn("kv.code es el código ADMIN. Usa APP_PEDIDO_CODE: el worker solo necesita pedidos y video:*.");
+    if (a.modo === "admin") log.warn("kv.code es el código ADMIN. Usa APP_PEDIDO_CODE.");
   } catch (e) {
     log.error("No pude conectar con el manager: " + e.message);
     process.exit(1);
@@ -60,12 +61,12 @@ async function main() {
   const deps = {
     kv, log, ffmpeg: cfg.ffmpeg, salidaDir: cfg.carpetaSalida, alto: cfg.alto,
     carpetaDe: court => carpetaDeCancha(cfg, court),
-    listarSegmentos, cortar,
+    listarSegmentos, cortar, cortarClip,
     subir: (ruta, key, o) => subidor.subir(ruta, key, o),
+    descargar: (key, destino) => subidor.descargar(key, destino),
     borrarLocal: ruta => { if (cfg.borrarSalidaTrasSubir) fs.unlinkSync(ruta); },
   };
 
-  /* ── Cola ── */
   let ocupado = false, ultimaLimpiezaPedidos = 0, enCola = 0;
   async function revisarCola() {
     if (ocupado) return;
@@ -77,7 +78,6 @@ async function main() {
         if (!it.value || typeof it.value !== "object") continue;
         const codigo = it.key.slice("pedido:".length);
         let r = aRegistro(codigo, it.value, null);
-        // Pedidos de versiones viejas (creados por pedir-video) no traen horario: se busca en video:*
         if (!r.endTime && ["programado", "pendiente", "error", "procesando"].includes(r.estado)) {
           const reserva = await kv.get("video:" + codigo);
           if (!reserva) { await kv.set("pedido:" + codigo, Object.assign({}, r, { estado: "error", error: "La reserva ya no existe" })); continue; }
@@ -92,7 +92,18 @@ async function main() {
         log.info(`[${p.codigo}] ${p.fecha} ${p.startTime}–${p.endTime} · ${p.court}`);
         await procesarPedido(p, deps);
       }
-      // Una vez al día: borrar pedidos de hace más de 45 días (el video ya se borró de R2 a los 30).
+
+      /* Cortes de hasta 2 minutos, solicitados desde Padel Replay. */
+      const cortes = await kv.listar("corte:");
+      for (const it of cortes) {
+        const c = it.value;
+        if (!c || typeof c !== "object") continue;
+        if (["listo", "procesando"].includes(c.estado)) continue;
+        if (c.estado === "error" && (c.intentos || 0) >= 3) continue;
+        enCola += 1;
+        await procesarCorte(it.key, c, deps);
+      }
+
       if (Date.now() - ultimaLimpiezaPedidos > 86400000) {
         ultimaLimpiezaPedidos = Date.now();
         const limite = Date.now() - 45 * 86400000;
@@ -112,7 +123,6 @@ async function main() {
     }
   }
 
-  /* ── Latido ── */
   function discoLibreGB(ruta) {
     try { const s = fs.statfsSync(ruta); return Math.round(s.bavail * s.bsize / 1e9 * 10) / 10; }
     catch (_) { return null; }
@@ -131,19 +141,13 @@ async function main() {
   async function latir() {
     try {
       await kv.set("worker:heartbeat", {
-        ts: Date.now(),
-        version: VERSION,
-        pc: require("os").hostname(),
-        discoLibreGB: discoLibreGB(cfg.carpetaGrabaciones),
-        enCola,
+        ts: Date.now(), version: VERSION, pc: require("os").hostname(),
+        discoLibreGB: discoLibreGB(cfg.carpetaGrabaciones), enCola,
         camaras: grabadores.map(g => ({ id: g.id, grabando: g.grabando(), ultimoSegmento: ultimoSegmento(g.carpeta) })),
       });
-    } catch (e) {
-      log.warn("Latido: " + e.message);
-    }
+    } catch (e) { log.warn("Latido: " + e.message); }
   }
 
-  /* ── Limpieza de segmentos ── */
   function limpiar() {
     for (const g of grabadores) {
       const n = limpiarAntiguos(g.carpeta, cfg.retencionHoras);
