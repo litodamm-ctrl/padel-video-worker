@@ -6,14 +6,13 @@ const { aLocal } = require("./cola.js");
 const { seleccionar } = require("./segmentos.js");
 const { claveDe } = require("./subida.js");
 
-const MINIMO_SEG = 30; // menos de medio minuto de grabación no es un video
+const MINIMO_SEG = 30;
 
 async function procesarPedido(p, deps) {
   const { kv, log, ffmpeg, salidaDir, carpetaDe, listarSegmentos, cortar, subir, borrarLocal, alto } = deps;
   const key = "pedido:" + p.codigo;
   const base = Object.assign({}, p, { intentos: (p.intentos || 0) + 1, tsProceso: Date.now() });
 
-  // Las escrituras van en cadena para que nunca llegue una vieja después de una nueva.
   let cadena = Promise.resolve();
   function marcar(cambios) {
     Object.assign(base, cambios);
@@ -29,7 +28,6 @@ async function procesarPedido(p, deps) {
 
   try {
     await marcar({ estado: "procesando", paso: "buscando grabación", avance: 5, error: null });
-
     const inicio = aLocal(p.fecha, p.startTime), fin = aLocal(p.fecha, p.endTime);
     if (!inicio || !fin || fin <= inicio) return fallar("La reserva no tiene fecha u horario válidos");
 
@@ -38,9 +36,7 @@ async function procesarPedido(p, deps) {
 
     const segs = await listarSegmentos(carpeta, inicio, fin, { ffmpeg });
     const sel = seleccionar(segs, inicio, fin);
-    if (!sel || sel.duracion < MINIMO_SEG) {
-      return fallar(`No hay grabación de ${p.fecha} ${p.startTime}–${p.endTime} en ${carpeta}`);
-    }
+    if (!sel || sel.duracion < MINIMO_SEG) return fallar(`No hay grabación de ${p.fecha} ${p.startTime}–${p.endTime} en ${carpeta}`);
     if (sel.parcial) log.warn(`[${p.codigo}] grabación incompleta: faltan ${sel.faltanteSeg} s`);
 
     await marcar({ paso: "armando el video", avance: 10, parcial: sel.parcial });
@@ -62,6 +58,7 @@ async function procesarPedido(p, deps) {
       estado: "listo", paso: null, avance: 100, error: null,
       url: res.url, key: res.key,
       duracion: sel.duracion, parcial: sel.parcial, faltanteSeg: sel.faltanteSeg,
+      orientacionCorregida: true, marcaClub: true,
       tsListo: Date.now(),
     });
     try { borrarLocal(salida); } catch (_) {}
