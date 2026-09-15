@@ -1,15 +1,11 @@
-/* Subida a Cloudflare R2 por la API compatible con S3.
-   Config esperada (config.json → "r2"):
-     accountId, accessKeyId, secretAccessKey, bucket,
-     publicBaseUrl  → "https://pub-xxxx.r2.dev" o tu dominio (videos.bahiapadel.com)
-   La URL pública se guarda en el pedido; padelreplay la firma si tiene
-   credenciales, y si no la usa tal cual. */
+/* Subida y descarga a Cloudflare R2 por la API compatible con S3. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const { pipeline } = require("stream/promises");
 
 function crearSubidor(cfg) {
-  const { S3Client, PutObjectCommand, HeadBucketCommand } = require("@aws-sdk/client-s3");
+  const { S3Client, PutObjectCommand, GetObjectCommand, HeadBucketCommand } = require("@aws-sdk/client-s3");
   for (const k of ["accountId", "accessKeyId", "secretAccessKey", "bucket"]) {
     if (!cfg || !cfg[k]) throw new Error("Falta r2." + k + " en config.json");
   }
@@ -21,7 +17,6 @@ function crearSubidor(cfg) {
   const base = String(cfg.publicBaseUrl || "").replace(/\/+$/, "");
 
   return {
-    /* Sube `ruta` como `key`. Devuelve { url, key }. Reintenta 3 veces. */
     async subir(ruta, key, opts) {
       const nombre = (opts && opts.nombreDescarga) || path.basename(key);
       let ultimo = null;
@@ -44,6 +39,13 @@ function crearSubidor(cfg) {
       }
       throw new Error("No se pudo subir a R2: " + (ultimo && ultimo.message));
     },
+    async descargar(key, destino) {
+      fs.mkdirSync(path.dirname(destino), { recursive: true });
+      const r = await cliente.send(new GetObjectCommand({ Bucket: cfg.bucket, Key: key }));
+      if (!r.Body) throw new Error("R2 no devolvió contenido para " + key);
+      await pipeline(r.Body, fs.createWriteStream(destino));
+      return destino;
+    },
     async probar() {
       await cliente.send(new HeadBucketCommand({ Bucket: cfg.bucket }));
       return true;
@@ -51,10 +53,14 @@ function crearSubidor(cfg) {
   };
 }
 
-/* Clave del objeto en el bucket: videos/AAAA/MM/BP-XXXXXX.mp4 */
 function claveDe(codigo, fecha) {
   const [y, m] = String(fecha || "").split("-");
   return "videos/" + (y || "0000") + "/" + (m || "00") + "/" + codigo + ".mp4";
 }
 
-module.exports = { crearSubidor, claveDe };
+function claveCorteDe(codigo, fecha, id) {
+  const [y, m] = String(fecha || "").split("-");
+  return "cortes/" + (y || "0000") + "/" + (m || "00") + "/" + codigo + "-" + id + ".mp4";
+}
+
+module.exports = { crearSubidor, claveDe, claveCorteDe };
