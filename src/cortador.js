@@ -62,11 +62,11 @@ async function listarSegmentos(dir, desde, hasta, opts) {
   return out;
 }
 
+/* La cámara ya entrega la imagen en la orientación correcta para la instalación
+   física del club. Solo escalamos y agregamos una marca discreta abajo. */
 function filtroBahia(alto) {
   const h = alto || 720;
   return [
-    "hflip",
-    "vflip",
     "scale=-2:" + h,
     "drawtext=text='Bahía Padel Social Club':fontcolor=white@0.92:fontsize=28:box=1:boxcolor=black@0.42:boxborderw=10:x=(w-text_w)/2:y=h-text_h-24",
   ].join(",");
