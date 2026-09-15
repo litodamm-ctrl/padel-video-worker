@@ -18,6 +18,7 @@ const { procesarCorte } = require("./procesar-corte.js");
 
 const VERSION = require("../package.json").version;
 const RAIZ = path.join(__dirname, "..");
+const PREFIJO_CORTE = "pedido:clip:";
 
 async function main() {
   const log = crearLog(path.join(RAIZ, "logs"));
@@ -75,6 +76,7 @@ async function main() {
       const items = await kv.listar("pedido:");
       const pedidos = [];
       for (const it of items) {
+        if (it.key.indexOf(PREFIJO_CORTE) === 0) continue;
         if (!it.value || typeof it.value !== "object") continue;
         const codigo = it.key.slice("pedido:".length);
         let r = aRegistro(codigo, it.value, null);
@@ -93,8 +95,9 @@ async function main() {
         await procesarPedido(p, deps);
       }
 
-      /* Cortes de hasta 2 minutos, solicitados desde Padel Replay. */
-      const cortes = await kv.listar("corte:");
+      /* Los clips usan pedido:clip:* para aprovechar el permiso existente de
+         APP_PEDIDO_CODE sin ampliar los privilegios del worker. */
+      const cortes = await kv.listar(PREFIJO_CORTE);
       for (const it of cortes) {
         const c = it.value;
         if (!c || typeof c !== "object") continue;
