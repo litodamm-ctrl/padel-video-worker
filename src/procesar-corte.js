@@ -25,6 +25,7 @@ async function procesarCorte(key, c, deps) {
     await marcar({ paso: "cortando", avance: 30 });
     await cortarClip({
       entrada: original, inicioSeg: inicio, duracion: dur, salida, ffmpeg,
+      normalizado: !!base.normalizado,
       onProgreso: pct => {
         const a = 30 + Math.round(pct * 0.5);
         if (a % 10 === 0) marcar({ avance: a }).catch(() => {});
