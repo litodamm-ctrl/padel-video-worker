@@ -7,15 +7,12 @@ const { spawn, spawnSync } = require("child_process");
 const { parsearNombre, RE_NOMBRE } = require("./segmentos.js");
 
 function ffprobeDe(ffmpeg) {
-  // "C:\\x\\ffmpeg.exe" → "C:\\x\\ffprobe.exe"; "ffmpeg" → "ffprobe"
   return String(ffmpeg || "ffmpeg").replace(/ffmpeg(\.exe)?$/i, (m, ext) => "ffprobe" + (ext || ""));
 }
-
 function hayFfmpeg(ffmpeg) {
   try { return spawnSync(ffmpeg || "ffmpeg", ["-version"], { stdio: "ignore" }).status === 0; }
   catch (_) { return false; }
 }
-
 function ejecutar(bin, args, opts) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -31,19 +28,13 @@ function ejecutar(bin, args, opts) {
     });
   });
 }
-
-/* Duración en segundos de un archivo de video (ffprobe). */
 async function duracionDe(ruta, ffmpeg) {
   const out = await ejecutar(ffprobeDe(ffmpeg), ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", ruta], { timeoutMs: 30000 });
   const n = parseFloat(String(out).trim());
   if (!isFinite(n)) throw new Error("ffprobe no devolvió duración para " + ruta);
   return n;
 }
-
-const cacheDur = new Map(); // ruta|tamaño → duración
-
-/* Segmentos de `dir` cuyo nombre cae cerca del rango [desde, hasta]. Mide con
-   ffprobe la duración real (un segmento cortado por un reinicio dura menos). */
+const cacheDur = new Map();
 async function listarSegmentos(dir, desde, hasta, opts) {
   const ffmpeg = (opts && opts.ffmpeg) || "ffmpeg";
   const nominal = (opts && opts.duracionNominal) || 300;
@@ -63,9 +54,7 @@ async function listarSegmentos(dir, desde, hasta, opts) {
       const k = ruta + "|" + st.size;
       if (cacheDur.has(k)) duracion = cacheDur.get(k);
       else { duracion = await duracionDe(ruta, ffmpeg); cacheDur.set(k, duracion); }
-    } catch (e) {
-      continue;
-    }
+    } catch (_) { continue; }
     if (!(duracion > 0.5)) continue;
     out.push({ ruta, inicio, duracion });
   }
@@ -73,8 +62,6 @@ async function listarSegmentos(dir, desde, hasta, opts) {
   return out;
 }
 
-/* La cámara de Bahía está instalada invertida. Normalizamos todos los videos
-   girándolos 180° y añadimos una marca discreta en la parte inferior. */
 function filtroBahia(alto) {
   const h = alto || 720;
   return [
@@ -85,8 +72,6 @@ function filtroBahia(alto) {
   ].join(",");
 }
 
-/* Corta: concatena `archivos`, salta `offset` segundos y toma `duracion`.
-   Recodifica a H.264, corrige la orientación y agrega marca del club. */
 async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProgreso }) {
   const bin = ffmpeg || "ffmpeg";
   const lista = salida + ".lista.txt";
@@ -97,10 +82,8 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
     "-ss", String(offset), "-t", String(duracion),
     "-vf", filtroBahia(alto),
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "96k",
-    "-movflags", "+faststart",
-    "-progress", "pipe:1",
-    salida,
+    "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+    "-progress", "pipe:1", salida,
   ];
   await new Promise((resolve, reject) => {
     const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
@@ -121,17 +104,15 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
   return salida;
 }
 
-/* Produce un clip corto a partir del video final ya corregido/marcado. Se
-   recodifica para que inicio y fin sean exactos incluso entre keyframes. */
-async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProgreso }) {
+async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProgreso, normalizado }) {
   const bin = ffmpeg || "ffmpeg";
-  const args = [
-    "-y", "-hide_banner", "-loglevel", "error", "-nostats",
-    "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion),
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion)];
+  if (!normalizado) args.push("-vf", filtroBahia(720));
+  args.push(
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
-    "-progress", "pipe:1", salida,
-  ];
+    "-progress", "pipe:1", salida
+  );
   await new Promise((resolve, reject) => {
     const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let err = "";
