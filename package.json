@@ -1,7 +1,7 @@
 {
   "name": "padel-video-worker",
-  "version": "1.1.0",
-  "description": "Bahía Padel · graba las canchas, corrige orientación, marca videos, crea cortes y sube a Cloudflare R2",
+  "version": "1.2.0",
+  "description": "Bahía Padel · graba las canchas con audio, estabiliza timestamps, marca videos, crea cortes y sube a Cloudflare R2",
   "private": true,
   "main": "src/index.js",
   "scripts": {
