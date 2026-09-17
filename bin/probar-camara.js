@@ -38,6 +38,16 @@ for (const c of camaras) {
     continue;
   }
   console.log("✔ Responde:\n  " + p.stdout.trim().replace(/\n/g, "\n  "));
+
+  const pa = spawnSync(ffprobe, ["-v", "error", "-rtsp_transport", "tcp", "-select_streams", "a:0",
+    "-show_entries", "stream=codec_name,sample_rate,channels", "-of", "default=nw=1", c.rtsp],
+    { encoding: "utf8", timeout: 20000 });
+  if (pa.status === 0 && String(pa.stdout || "").trim()) {
+    console.log("✔ Audio detectado:\n  " + pa.stdout.trim().replace(/\n/g, "\n  "));
+  } else {
+    console.log("⚠ No detecté audio en este RTSP. Si la cámara tiene micrófono, activa Audio en el stream principal.");
+  }
+
   const out = path.join(os.tmpdir(), "bp-prueba-" + c.id + ".mp4");
   const g = spawnSync(ffmpeg, ["-y", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", c.rtsp, "-t", "8", "-c", "copy", out],
     { encoding: "utf8", timeout: 40000 });
