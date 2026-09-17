@@ -1,6 +1,7 @@
-/* Graba una cámara RTSP sin parar, en segmentos de N segundos, copiando el
-   stream tal cual (sin recodificar: casi no usa CPU). Si ffmpeg se cae o la
-   cámara se desconecta, espera y vuelve a arrancar. */
+/* Graba una cámara RTSP sin parar, en segmentos de N segundos.
+   El video se copia sin recodificar; si la cámara trae audio, se normaliza a
+   AAC para que el MP4 final sea compatible. También regeneramos timestamps
+   para evitar micro-pausas en los videos al unir segmentos. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -17,9 +18,14 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-rtsp_transport", "tcp",
-      "-use_wallclock_as_timestamps", "1",
+      "-fflags", "+genpts+discardcorrupt",
       "-i", rtsp,
-      "-c", "copy",
+      "-map", "0:v:0",
+      "-map", "0:a?",
+      "-c:v", "copy",
+      "-c:a", "aac", "-b:a", "96k", "-ar", "48000",
+      "-avoid_negative_ts", "make_zero",
+      "-max_interleave_delta", "0",
       "-f", "segment",
       "-segment_time", String(segundosSegmento || 300),
       "-segment_atclocktime", "1",
