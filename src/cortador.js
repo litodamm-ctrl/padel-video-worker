@@ -67,6 +67,7 @@ async function listarSegmentos(dir, desde, hasta, opts) {
 function filtroBahia(alto) {
   const h = alto || 720;
   return [
+    "setpts=PTS-STARTPTS",
     "scale=-2:" + h,
     "drawtext=text='Bahía Padel Social Club':fontcolor=white@0.92:fontsize=28:box=1:boxcolor=black@0.42:boxborderw=10:x=(w-text_w)/2:y=h-text_h-24",
   ].join(",");
@@ -78,11 +79,18 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
   fs.writeFileSync(lista, archivos.map(a => "file '" + a.replace(/\\/g, "/").replace(/'/g, "'\\''") + "'").join("\n") + "\n");
   const args = [
     "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+    "-fflags", "+genpts+discardcorrupt",
     "-f", "concat", "-safe", "0", "-i", lista,
     "-ss", String(offset), "-t", String(duracion),
+    "-map", "0:v:0", "-map", "0:a?",
     "-vf", filtroBahia(alto),
+    "-af", "aresample=async=1000:first_pts=0",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+    "-fps_mode", "cfr",
+    "-c:a", "aac", "-b:a", "128k",
+    "-avoid_negative_ts", "make_zero",
+    "-max_interleave_delta", "0",
+    "-movflags", "+faststart",
     "-progress", "pipe:1", salida,
   ];
   await new Promise((resolve, reject) => {
@@ -106,11 +114,20 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
 
 async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProgreso, normalizado }) {
   const bin = ffmpeg || "ffmpeg";
-  const args = ["-y", "-hide_banner", "-loglevel", "error", "-nostats", "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion)];
-  if (!normalizado) args.push("-vf", filtroBahia(720));
+  const args = ["-y", "-hide_banner", "-loglevel", "error", "-nostats",
+    "-fflags", "+genpts+discardcorrupt",
+    "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion),
+    "-map", "0:v:0", "-map", "0:a?"
+  ];
+  args.push("-vf", normalizado ? "setpts=PTS-STARTPTS" : filtroBahia(720));
   args.push(
+    "-af", "aresample=async=1000:first_pts=0",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+    "-fps_mode", "cfr",
+    "-c:a", "aac", "-b:a", "128k",
+    "-avoid_negative_ts", "make_zero",
+    "-max_interleave_delta", "0",
+    "-movflags", "+faststart",
     "-progress", "pipe:1", salida
   );
   await new Promise((resolve, reject) => {
