@@ -49,8 +49,17 @@ for (const c of camaras) {
   }
 
   const out = path.join(os.tmpdir(), "bp-prueba-" + c.id + ".mp4");
-  const g = spawnSync(ffmpeg, ["-y", "-loglevel", "error", "-rtsp_transport", "tcp", "-i", c.rtsp, "-t", "8", "-c", "copy", out],
-    { encoding: "utf8", timeout: 40000 });
+  const g = spawnSync(ffmpeg, [
+    "-y", "-loglevel", "error", "-rtsp_transport", "tcp",
+    "-fflags", "+genpts+discardcorrupt",
+    "-i", c.rtsp, "-t", "8",
+    "-map", "0:v:0", "-map", "0:a?",
+    "-c:v", "copy",
+    "-c:a", "aac", "-b:a", "96k", "-ar", "48000",
+    "-avoid_negative_ts", "make_zero",
+    "-movflags", "+faststart",
+    out
+  ], { encoding: "utf8", timeout: 40000 });
   if (g.status === 0 && fs.existsSync(out) && fs.statSync(out).size > 10000) {
     console.log(`✔ Grabé 8 s de prueba (${Math.round(fs.statSync(out).size / 1024)} KB) en ${out}`);
     console.log("  Ábrelo con el reproductor de Windows para confirmar que se ve la cancha.");
