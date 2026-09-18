@@ -14,7 +14,7 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
   function arrancar() {
     if (detenido) return;
     ultimoArranque = Date.now();
-    const patron = path.join(carpeta, "%Y%m%d-%H%M%S.mp4");
+    const patron = path.join(carpeta, "%Y%m%d-%H%M%S.ts");
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-rtsp_transport", "tcp",
@@ -31,8 +31,7 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
       "-segment_atclocktime", "1",
       "-reset_timestamps", "1",
       "-strftime", "1",
-      "-segment_format", "mp4",
-      "-segment_format_options", "movflags=+frag_keyframe+empty_moov+default_base_moof",
+      "-segment_format", "mpegts",
       patron,
     ];
     proceso = spawn(ffmpeg || "ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
