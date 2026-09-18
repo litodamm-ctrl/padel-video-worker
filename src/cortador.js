@@ -116,10 +116,15 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
 async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProgreso, normalizado }) {
   const bin = ffmpeg || "ffmpeg";
   const args = ["-y", "-hide_banner", "-loglevel", "error", "-nostats",
-    "-fflags", "+genpts+discardcorrupt",
+    "-fflags", "+genpts+discardcorrupt"
+  ];
+  if (/^https?:\/\//i.test(String(entrada || ""))) {
+    args.push("-rw_timeout", "15000000", "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "2");
+  }
+  args.push(
     "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion),
     "-map", "0:v:0", "-map", "0:a?"
-  ];
+  );
   args.push("-vf", normalizado ? "setpts=PTS-STARTPTS,fps=25:round=near" : filtroBahia(720));
   args.push(
     "-af", "aresample=48000,asetpts=N/SR/TB",
