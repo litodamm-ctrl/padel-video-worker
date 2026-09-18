@@ -67,7 +67,8 @@ async function listarSegmentos(dir, desde, hasta, opts) {
 function filtroBahia(alto) {
   const h = alto || 720;
   return [
-    "setpts=N/(25*TB)",
+    "setpts=PTS-STARTPTS",
+    "fps=25:round=near",
     "scale=-2:" + h,
     "drawtext=text='Bahía Padel Social Club':fontcolor=white@0.92:fontsize=28:box=1:boxcolor=black@0.42:boxborderw=10:x=(w-text_w)/2:y=h-text_h-24",
   ].join(",");
@@ -84,9 +85,9 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
     "-ss", String(offset), "-t", String(duracion),
     "-map", "0:v:0", "-map", "0:a?",
     "-vf", filtroBahia(alto),
-    "-af", "aresample=48000,asetpts=N/SR/TB",
+    "-af", "aresample=48000:async=1000:first_pts=0",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-    "-r", "25", "-r", "25", "-fps_mode", "cfr",
+    "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "128k",
     "-avoid_negative_ts", "make_zero",
     "-max_interleave_delta", "0",
@@ -119,7 +120,7 @@ async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProg
     "-ss", String(inicioSeg), "-i", entrada, "-t", String(duracion),
     "-map", "0:v:0", "-map", "0:a?"
   ];
-  args.push("-vf", normalizado ? "setpts=N/(25*TB)" : filtroBahia(720));
+  args.push("-vf", normalizado ? "setpts=PTS-STARTPTS,fps=25:round=near" : filtroBahia(720));
   args.push(
     "-af", "aresample=48000,asetpts=N/SR/TB",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
