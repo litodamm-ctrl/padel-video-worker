@@ -86,7 +86,7 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
     "-vf", filtroBahia(alto),
     "-af", "aresample=48000,asetpts=N/SR/TB",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
-    "-r", "25", "-fps_mode", "cfr",
+    "-r", "25", "-r", "25", "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "128k",
     "-avoid_negative_ts", "make_zero",
     "-max_interleave_delta", "0",
@@ -121,7 +121,7 @@ async function cortarClip({ entrada, inicioSeg, duracion, salida, ffmpeg, onProg
   ];
   args.push("-vf", normalizado ? "setpts=N/(25*TB)" : filtroBahia(720));
   args.push(
-    "-af", "aresample=async=1000:first_pts=0",
+    "-af", "aresample=48000,asetpts=N/SR/TB",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
     "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "128k",
