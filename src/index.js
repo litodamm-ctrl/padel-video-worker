@@ -134,7 +134,7 @@ async function main() {
     try {
       let max = 0;
       for (const n of fs.readdirSync(carpeta)) {
-        if (!/\.mp4$/i.test(n)) continue;
+        if (!/\.(mp4|mkv|ts)$/i.test(n)) continue;
         const m = fs.statSync(path.join(carpeta, n)).mtimeMs;
         if (m > max) max = m;
       }
@@ -158,8 +158,28 @@ async function main() {
     }
   }
 
+  function vigilarGrabadores() {
+    const ahora = Date.now();
+    const maxSinSegmentoMs = Math.max((cfg.segundosSegmento || 300) + 180, 420) * 1000;
+    for (const g of grabadores) {
+      const ultimo = ultimoSegmento(g.carpeta);
+      const arranque = g.ultimoArranque ? g.ultimoArranque() : null;
+      const referencia = ultimo || arranque;
+      if (!g.grabando()) {
+        g.reiniciar && g.reiniciar("ffmpeg no está activo");
+        continue;
+      }
+      if (referencia && ahora - referencia > maxSinSegmentoMs) {
+        const min = Math.round((ahora - referencia) / 60000);
+        g.reiniciar && g.reiniciar(`sin segmento nuevo hace ${min} min`);
+      }
+    }
+  }
+
   setTimeout(revisarCola, 5000);
   setInterval(revisarCola, cfg.intervaloColaSeg * 1000);
+  setTimeout(vigilarGrabadores, 60000);
+  setInterval(vigilarGrabadores, 60000);
   setTimeout(latir, 2000);
   setInterval(latir, cfg.intervaloLatidoSeg * 1000);
   setInterval(limpiar, 3600 * 1000);
