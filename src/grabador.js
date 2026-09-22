@@ -61,7 +61,17 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
     id, carpeta,
     iniciar: arrancar,
     detener() { detenido = true; if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} } },
+    reiniciar(motivo) {
+      if (detenido) return;
+      log.warn(`[${id}] reinicio preventivo${motivo ? ": " + motivo : ""}`);
+      if (proceso) {
+        try { proceso.kill("SIGTERM"); } catch (_) {}
+      } else {
+        arrancar();
+      }
+    },
     grabando() { return !!proceso; },
+    ultimoArranque() { return ultimoArranque || null; },
   };
 }
 
