@@ -16,29 +16,36 @@ function crearSubidor(cfg) {
   });
   const base = String(cfg.publicBaseUrl || "").replace(/\/+$/, "");
 
-  return {
-    async subir(ruta, key, opts) {
-      const nombre = (opts && opts.nombreDescarga) || path.basename(key);
-      let ultimo = null;
-      for (let i = 1; i <= 3; i++) {
-        try {
-          await cliente.send(new PutObjectCommand({
-            Bucket: cfg.bucket,
-            Key: key,
-            Body: fs.createReadStream(ruta),
-            ContentType: "video/mp4",
-            ContentLength: fs.statSync(ruta).size,
-            ContentDisposition: 'attachment; filename="' + nombre + '"',
-            CacheControl: "public, max-age=31536000, immutable",
-          }));
-          return { url: base ? base + "/" + key : null, key };
-        } catch (e) {
-          ultimo = e;
-          await new Promise(r => setTimeout(r, 3000 * i));
+  async function subirArchivo(ruta, key, opts) {
+    const o = opts || {};
+    const nombre = o.nombreDescarga || path.basename(key);
+    let ultimo = null;
+    for (let i = 1; i <= 3; i++) {
+      try {
+        const input = {
+          Bucket: cfg.bucket,
+          Key: key,
+          Body: fs.createReadStream(ruta),
+          ContentType: o.contentType || "video/mp4",
+          ContentLength: fs.statSync(ruta).size,
+          CacheControl: o.cacheControl || "public, max-age=31536000, immutable",
+        };
+        if (o.contentDisposition !== null) {
+          input.ContentDisposition = o.contentDisposition || ('attachment; filename="' + nombre + '"');
         }
+        await cliente.send(new PutObjectCommand(input));
+        return { url: base ? base + "/" + key : null, key };
+      } catch (e) {
+        ultimo = e;
+        await new Promise(r => setTimeout(r, 3000 * i));
       }
-      throw new Error("No se pudo subir a R2: " + (ultimo && ultimo.message));
-    },
+    }
+    throw new Error("No se pudo subir a R2: " + (ultimo && ultimo.message));
+  }
+
+  return {
+    subir: subirArchivo,
+    subirArchivo,
     async descargar(key, destino) {
       fs.mkdirSync(path.dirname(destino), { recursive: true });
       const r = await cliente.send(new GetObjectCommand({ Bucket: cfg.bucket, Key: key }));
