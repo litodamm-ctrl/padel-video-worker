@@ -1,7 +1,7 @@
 {
   "name": "padel-video-worker",
-  "version": "1.4.2",
-  "description": "Bahía Padel · graba las canchas con audio, usa segmentos robustos, conserva la duración real, regulariza a 25 fps, marca videos, crea cortes y sube a Cloudflare R2",
+  "version": "1.5.0",
+  "description": "Bahía Padel · graba las canchas con audio, usa segmentos robustos, conserva la duración real, regulariza a 25 fps, marca videos, crea cortes y sube a Cloudflare R2 y publica cámaras en vivo",
   "private": true,
   "main": "src/index.js",
   "scripts": {
