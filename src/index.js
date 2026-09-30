@@ -15,10 +15,12 @@ const { crearSubidor } = require("./subida.js");
 const { pendientes, aRegistro } = require("./cola.js");
 const { procesarPedido } = require("./procesar.js");
 const { procesarCorte } = require("./procesar-corte.js");
+const { crearPublicadorLive } = require("./live.js");
 
 const VERSION = require("../package.json").version;
 const RAIZ = path.join(__dirname, "..");
 const PREFIJO_CORTE = "pedido:clip:";
+const PREFIJO_LIVE = "live-5d5e2f75b7525dd7f8f278e8";
 
 async function main() {
   const log = crearLog(path.join(RAIZ, "logs"));
@@ -58,6 +60,16 @@ async function main() {
     carpeta: path.join(cfg.carpetaGrabaciones, c.id),
   }));
   grabadores.forEach(g => g.iniciar());
+
+  const publicadoresLive = cfg.camaras.map(c => crearPublicadorLive({
+    cam: c,
+    ffmpeg: cfg.ffmpeg,
+    carpeta: path.join(RAIZ, "live", c.id),
+    subir: (ruta, key, o) => subidor.subirArchivo(ruta, key, o),
+    log,
+    prefijo: PREFIJO_LIVE,
+  }));
+  publicadoresLive.forEach(p => p.iniciar());
 
   const deps = {
     kv, log, ffmpeg: cfg.ffmpeg, salidaDir: cfg.carpetaSalida, alto: cfg.alto,
@@ -146,7 +158,12 @@ async function main() {
       await kv.set("worker:heartbeat", {
         ts: Date.now(), version: VERSION, pc: require("os").hostname(),
         discoLibreGB: discoLibreGB(cfg.carpetaGrabaciones), enCola,
-        camaras: grabadores.map(g => ({ id: g.id, grabando: g.grabando(), ultimoSegmento: ultimoSegmento(g.carpeta) })),
+        camaras: grabadores.map(g => ({
+          id: g.id,
+          grabando: g.grabando(),
+          ultimoSegmento: ultimoSegmento(g.carpeta),
+          live: !!(publicadoresLive.find(p => p.id === g.id) || {}).activo?.(),
+        })),
       });
     } catch (e) { log.warn("Latido: " + e.message); }
   }
@@ -188,6 +205,7 @@ async function main() {
   function salir(senal) {
     log.info(`Recibido ${senal}: deteniendo grabación`);
     grabadores.forEach(g => g.detener());
+    publicadoresLive.forEach(p => p.detener());
     setTimeout(() => process.exit(0), 1500);
   }
   process.on("SIGINT", () => salir("SIGINT"));
