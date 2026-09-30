@@ -1,0 +1,114 @@
+"use strict";
+const fs = require("fs");
+const path = require("path");
+const { spawn } = require("child_process");
+
+function rtspSecundario(cam) {
+  if (cam.liveRtsp) return cam.liveRtsp;
+  const raw = String(cam.rtsp || "");
+  if (/subtype=0\b/i.test(raw)) return raw.replace(/subtype=0\b/i, "subtype=1");
+  return raw;
+}
+
+function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
+  let proceso = null;
+  let detenido = false;
+  let timer = null;
+  let subiendo = false;
+  let reinicios = 0;
+  const vistos = new Map();
+
+  fs.mkdirSync(carpeta, { recursive: true });
+
+  function lanzar() {
+    if (detenido) return;
+    const entrada = rtspSecundario(cam);
+    const playlist = path.join(carpeta, "index.m3u8");
+    const segmentos = path.join(carpeta, "seg-%06d.ts");
+    const args = [
+      "-hide_banner", "-loglevel", "warning", "-nostats",
+      "-rtsp_transport", "tcp",
+      "-fflags", "+genpts+discardcorrupt",
+      "-i", entrada,
+      "-map", "0:v:0", "-map", "0:a?",
+      "-c:v", "copy",
+      "-c:a", "aac", "-b:a", "64k", "-ar", "44100",
+      "-f", "hls",
+      "-hls_time", "3",
+      "-hls_list_size", "6",
+      "-hls_delete_threshold", "3",
+      "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+program_date_time",
+      "-hls_segment_filename", segmentos,
+      playlist,
+    ];
+    proceso = spawn(ffmpeg || "ffmpeg", args, { stdio:["ignore","ignore","pipe"], windowsHide:true });
+    let err = "";
+    log.info(`[${cam.id}] live iniciado con stream secundario`);
+    proceso.stderr.on("data", d => { err += d; if (err.length > 5000) err = err.slice(-5000); });
+    proceso.on("error", e => {
+      log.error(`[${cam.id}] live no pudo iniciar: ${e.message}`);
+      proceso = null;
+      reintentar();
+    });
+    proceso.on("close", code => {
+      proceso = null;
+      if (detenido) return;
+      const ult = err.trim().split("\n").slice(-2).join(" | ");
+      log.warn(`[${cam.id}] live terminó (código ${code})${ult ? ": "+ult : ""}`);
+      reintentar();
+    });
+  }
+
+  function reintentar() {
+    if (detenido) return;
+    reinicios += 1;
+    const espera = Math.min(60000, 2000 * Math.pow(2, Math.min(reinicios, 5)));
+    setTimeout(() => { if (!detenido) lanzar(); }, espera);
+  }
+
+  async function sincronizar() {
+    if (subiendo || detenido) return;
+    subiendo = true;
+    try {
+      let nombres = [];
+      try { nombres = fs.readdirSync(carpeta); } catch (_) { return; }
+      const candidatos = nombres.filter(n => /\.(ts|m3u8)$/i.test(n));
+      // Los segmentos se suben antes que el playlist para evitar referencias rotas.
+      candidatos.sort((a,b) => (a.endsWith(".m3u8") ? 1 : 0) - (b.endsWith(".m3u8") ? 1 : 0));
+      for (const nombre of candidatos) {
+        const ruta = path.join(carpeta, nombre);
+        let st;
+        try { st = fs.statSync(ruta); } catch (_) { continue; }
+        if (!st.size) continue;
+        const firma = st.size + ":" + Math.round(st.mtimeMs);
+        if (vistos.get(nombre) === firma) continue;
+        const tipo = nombre.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t";
+        const cache = nombre.endsWith(".m3u8") ? "no-store, max-age=0" : "public, max-age=30";
+        await subir(ruta, `${prefijo}/${cam.id}/${nombre}`, { contentType:tipo, cacheControl:cache, contentDisposition:null });
+        vistos.set(nombre, firma);
+      }
+    } catch (e) {
+      log.warn(`[${cam.id}] live subida: ${e.message}`);
+    } finally {
+      subiendo = false;
+    }
+  }
+
+  return {
+    id: cam.id,
+    iniciar() {
+      detenido = false;
+      lanzar();
+      if (!timer) timer = setInterval(sincronizar, 1500);
+      setTimeout(sincronizar, 3000);
+    },
+    detener() {
+      detenido = true;
+      if (timer) { clearInterval(timer); timer = null; }
+      if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} }
+    },
+    activo() { return !!proceso; },
+  };
+}
+
+module.exports = { crearPublicadorLive, rtspSecundario };
