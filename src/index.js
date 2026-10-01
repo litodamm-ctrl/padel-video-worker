@@ -12,7 +12,7 @@ const { crearKv } = require("./kv.js");
 const { crearGrabador, limpiarAntiguos } = require("./grabador.js");
 const { listarSegmentos, cortar, cortarClip, hayFfmpeg } = require("./cortador.js");
 const { crearSubidor } = require("./subida.js");
-const { pendientes, aRegistro } = require("./cola.js");
+const { pendientes, aRegistro, procesable } = require("./cola.js");
 const { procesarPedido } = require("./procesar.js");
 const { procesarCorte } = require("./procesar-corte.js");
 const { crearPublicadorLive } = require("./live.js");
@@ -92,9 +92,9 @@ async function main() {
         if (!it.value || typeof it.value !== "object") continue;
         const codigo = it.key.slice("pedido:".length);
         let r = aRegistro(codigo, it.value, null);
-        if (!r.endTime && ["programado", "pendiente", "error", "procesando"].includes(r.estado)) {
+        if (!r.endTime && procesable(r, new Date())) {
           const reserva = await kv.get("video:" + codigo);
-          if (!reserva) { await kv.set("pedido:" + codigo, Object.assign({}, r, { estado: "error", error: "La reserva ya no existe" })); continue; }
+          if (!reserva) { await kv.set("pedido:" + codigo, Object.assign({}, r, { estado: "cancelado", error: "La reserva ya no existe", tsCierre: Date.now() })); continue; }
           r = aRegistro(codigo, it.value, reserva);
         }
         pedidos.push(r);
@@ -177,11 +177,12 @@ async function main() {
 
   function vigilarGrabadores() {
     const ahora = Date.now();
-    const maxSinSegmentoMs = Math.max((cfg.segundosSegmento || 300) + 180, 420) * 1000;
+    // Se vigila la escritura (mtime), no solamente el cierre de cada segmento.
+    const maxSinSegmentoMs = 120000;
     for (const g of grabadores) {
       const ultimo = ultimoSegmento(g.carpeta);
       const arranque = g.ultimoArranque ? g.ultimoArranque() : null;
-      const referencia = ultimo || arranque;
+      const referencia = Math.max(ultimo || 0, arranque || 0);
       if (!g.grabando()) {
         g.reiniciar && g.reiniciar("ffmpeg no está activo");
         continue;

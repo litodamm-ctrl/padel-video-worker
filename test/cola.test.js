@@ -2,6 +2,12 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { aLocal, pendientes, aRegistro } = require("../src/cola.js");
 
+test('pedidos cerrados y errores agotados no vuelven a buscar reservas', () => {
+  const { procesable } = require('../src/cola.js');
+  assert.equal(procesable({estado:'cancelado'},new Date()),false);
+  assert.equal(procesable({estado:'error',intentos:3},new Date()),false);
+});
+
 test("aLocal convierte fecha y hora de la reserva a Date local", () => {
   assert.deepEqual(aLocal("2026-08-28", "15:30"), new Date(2026, 7, 28, 15, 30, 0));
 });

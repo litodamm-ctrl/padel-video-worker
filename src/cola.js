@@ -50,4 +50,4 @@ function aRegistro(codigo, pedido, reserva) {
   return out;
 }
 
-module.exports = { aLocal, pendientes, aRegistro, MAX_INTENTOS };
+module.exports = { aLocal, pendientes, aRegistro, MAX_INTENTOS, procesable };

@@ -7,12 +7,13 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 
-function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
-  let proceso = null, detenido = false, reinicios = 0, ultimoArranque = 0;
+function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log, spawnProcess = spawn, schedule = setTimeout, cancel = clearTimeout }) {
+  let proceso = null, detenido = false, reinicios = 0, ultimoArranque = 0, reintento = null;
   fs.mkdirSync(carpeta, { recursive: true });
 
   function arrancar() {
-    if (detenido) return;
+    if (detenido || proceso) return;
+    if (reintento) { cancel(reintento); reintento = null; }
     ultimoArranque = Date.now();
     const patron = path.join(carpeta, "%Y%m%d-%H%M%S.ts");
     const args = [
@@ -34,11 +35,11 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
       "-segment_format", "mpegts",
       patron,
     ];
-    proceso = spawn(ffmpeg || "ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
+    proceso = spawnProcess(ffmpeg || "ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
     log.info(`[${id}] grabando → ${carpeta}`);
     let err = "";
     proceso.stderr.on("data", d => { err += d; if (err.length > 4000) err = err.slice(-4000); });
-    proceso.on("error", e => { log.error(`[${id}] no se pudo lanzar ffmpeg: ${e.message}`); programarReinicio(); });
+    proceso.on("error", e => { log.error(`[${id}] no se pudo lanzar ffmpeg: ${e.message}`); });
     proceso.on("close", code => {
       proceso = null;
       if (detenido) return;
@@ -49,24 +50,24 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log }) {
   }
 
   function programarReinicio() {
-    if (detenido) return;
+    if (detenido || reintento) return;
     // Si duró más de un minuto, reinicio inmediato; si cae en bucle, espera creciente hasta 60 s.
     reinicios = (Date.now() - ultimoArranque > 60000) ? 0 : reinicios + 1;
     const espera = Math.min(60000, 2000 * Math.pow(2, reinicios));
     log.info(`[${id}] reintento en ${Math.round(espera / 1000)} s`);
-    setTimeout(arrancar, espera);
+    reintento = schedule(() => { reintento = null; arrancar(); }, espera);
   }
 
   return {
     id, carpeta,
     iniciar: arrancar,
-    detener() { detenido = true; if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} } },
+    detener() { detenido = true; if (reintento) { cancel(reintento); reintento = null; } if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} } },
     reiniciar(motivo) {
       if (detenido) return;
       log.warn(`[${id}] reinicio preventivo${motivo ? ": " + motivo : ""}`);
       if (proceso) {
         try { proceso.kill("SIGTERM"); } catch (_) {}
-      } else {
+      } else if (!reintento) {
         arrancar();
       }
     },
