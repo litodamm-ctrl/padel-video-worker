@@ -16,12 +16,14 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
   let timer = null;
   let subiendo = false;
   let reinicios = 0;
+  let reintento = null;
   const vistos = new Map();
 
   fs.mkdirSync(carpeta, { recursive: true });
 
   function lanzar() {
-    if (detenido) return;
+    if (detenido || proceso) return;
+    if (reintento) { clearTimeout(reintento); reintento = null; }
     const entrada = rtspSecundario(cam);
     const playlist = path.join(carpeta, "index.m3u8");
     const segmentos = path.join(carpeta, "seg-%06d.ts");
@@ -87,10 +89,13 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
   }
 
   function reintentar() {
-    if (detenido) return;
+    if (detenido || reintento) return;
     reinicios += 1;
     const espera = Math.min(60000, 2000 * Math.pow(2, Math.min(reinicios, 5)));
-    setTimeout(() => { if (!detenido) lanzar(); }, espera);
+    reintento = setTimeout(() => {
+      reintento = null;
+      if (!detenido) lanzar();
+    }, espera);
   }
 
   async function sincronizar() {
@@ -132,6 +137,7 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
     detener() {
       detenido = true;
       if (timer) { clearInterval(timer); timer = null; }
+      if (reintento) { clearTimeout(reintento); reintento = null; }
       if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} }
     },
     activo() { return !!proceso; },
