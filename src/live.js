@@ -26,13 +26,13 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
     if (reintento) { clearTimeout(reintento); reintento = null; }
     const entrada = rtspSecundario(cam);
     const playlist = path.join(carpeta, "index.m3u8");
-    const segmentos = path.join(carpeta, "seg-%06d.ts");
+    const segmentos = path.join(carpeta, "seg-%06d.m4s");
 
     // Un reinicio nunca debe mezclar segmentos de codecs distintos en el mismo
     // playlist. Limpiamos solo los archivos temporales del live.
     try {
       for (const n of fs.readdirSync(carpeta)) {
-        if (n === "index.m3u8" || /^seg-\d+\.ts$/i.test(n)) {
+        if (n === "index.m3u8" || n === "init.mp4" || /^seg-\d+\.m4s$/i.test(n)) {
           try { fs.unlinkSync(path.join(carpeta, n)); } catch (_) {}
         }
       }
@@ -61,11 +61,14 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
       "-g", "30",
       "-keyint_min", "30",
       "-sc_threshold", "0",
+      "-x264-params", "repeat-headers=1:keyint=30:min-keyint=30:scenecut=0",
       "-c:a", "aac", "-b:a", "64k", "-ar", "44100",
       "-f", "hls",
       "-hls_time", "2",
       "-hls_list_size", "6",
       "-hls_delete_threshold", "3",
+      "-hls_segment_type", "fmp4",
+      "-hls_fmp4_init_filename", "init.mp4",
       "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
       "-hls_segment_filename", segmentos,
       playlist,
@@ -104,7 +107,7 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
     try {
       let nombres = [];
       try { nombres = fs.readdirSync(carpeta); } catch (_) { return; }
-      const candidatos = nombres.filter(n => /\.(ts|m3u8)$/i.test(n));
+      const candidatos = nombres.filter(n => /\.(m4s|mp4|m3u8)$/i.test(n));
       // Los segmentos se suben antes que el playlist para evitar referencias rotas.
       candidatos.sort((a,b) => (a.endsWith(".m3u8") ? 1 : 0) - (b.endsWith(".m3u8") ? 1 : 0));
       for (const nombre of candidatos) {
@@ -114,7 +117,7 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
         if (!st.size) continue;
         const firma = st.size + ":" + Math.round(st.mtimeMs);
         if (vistos.get(nombre) === firma) continue;
-        const tipo = nombre.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp2t";
+        const tipo = nombre.endsWith(".m3u8") ? "application/vnd.apple.mpegurl" : "video/mp4";
         const cache = nombre.endsWith(".m3u8") ? "no-store, max-age=0" : "public, max-age=30";
         await subir(ruta, `${prefijo}/${cam.id}/${nombre}`, { contentType:tipo, cacheControl:cache, contentDisposition:null });
         vistos.set(nombre, firma);
