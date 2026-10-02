@@ -25,8 +25,8 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
     if (detenido || proceso) return;
     if (reintento) { clearTimeout(reintento); reintento = null; }
     const entrada = rtspSecundario(cam);
-    const playlist = path.join(carpeta, "index.m3u8");
-    const segmentos = path.join(carpeta, "seg-%06d.m4s");
+    const playlist = "index.m3u8";
+    const segmentos = "seg-%06d.m4s";
 
     // Un reinicio nunca debe mezclar segmentos de codecs distintos en el mismo
     // playlist. Limpiamos solo los archivos temporales del live.
@@ -73,7 +73,7 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
       "-hls_segment_filename", segmentos,
       playlist,
     ];
-    proceso = spawn(ffmpeg || "ffmpeg", args, { stdio:["ignore","ignore","pipe"], windowsHide:true });
+    proceso = spawn(ffmpeg || "ffmpeg", args, { stdio:["ignore","ignore","pipe"], windowsHide:true, cwd: carpeta });
     let err = "";
     log.info(`[${cam.id}] live iniciado · H.264/AAC compatible web`);
     proceso.stderr.on("data", d => { err += d; if (err.length > 5000) err = err.slice(-5000); });
