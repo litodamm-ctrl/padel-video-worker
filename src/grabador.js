@@ -7,20 +7,22 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 
-function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log, spawnProcess = spawn, schedule = setTimeout, cancel = clearTimeout }) {
+function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmento, log, spawnProcess = spawn, schedule = setTimeout, cancel = clearTimeout }) {
   let proceso = null, detenido = false, reinicios = 0, ultimoArranque = 0, reintento = null;
+  let usarFallback = false, fallosPrimario = 0;
   fs.mkdirSync(carpeta, { recursive: true });
 
   function arrancar() {
     if (detenido || proceso) return;
     if (reintento) { cancel(reintento); reintento = null; }
     ultimoArranque = Date.now();
+    const fuente = usarFallback && rtspFallback ? rtspFallback : rtsp;
     const patron = path.join(carpeta, "%Y%m%d-%H%M%S.ts");
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-rtsp_transport", "tcp",
       "-fflags", "+genpts+discardcorrupt",
-      "-i", rtsp,
+      "-i", fuente,
       "-map", "0:v:0",
       "-map", "0:a?",
       "-c:v", "copy",
@@ -36,15 +38,31 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log, spawn
       patron,
     ];
     proceso = spawnProcess(ffmpeg || "ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"], windowsHide: true });
-    log.info(`[${id}] grabando → ${carpeta}`);
+    log.info(`[${id}] grabando ${usarFallback ? "(respaldo secundario)" : "(principal)"} → ${carpeta}`);
     let err = "";
     proceso.stderr.on("data", d => { err += d; if (err.length > 4000) err = err.slice(-4000); });
     proceso.on("error", e => { log.error(`[${id}] no se pudo lanzar ffmpeg: ${e.message}`); });
     proceso.on("close", code => {
       proceso = null;
       if (detenido) return;
+      const duracion = Date.now() - ultimoArranque;
       const ultimas = err.trim().split("\n").slice(-2).join(" | ");
       log.warn(`[${id}] ffmpeg terminó (código ${code})${ultimas ? ": " + ultimas : ""}`);
+
+      if (!usarFallback && rtspFallback && rtspFallback !== rtsp) {
+        fallosPrimario = duracion < 120000 ? fallosPrimario + 1 : 0;
+        if (fallosPrimario >= 2) {
+          usarFallback = true;
+          reinicios = 0;
+          fallosPrimario = 0;
+          log.warn(`[${id}] principal inestable; usando stream secundario como respaldo para no perder grabación`);
+        }
+      } else if (usarFallback && duracion > 10 * 60 * 1000) {
+        usarFallback = false;
+        reinicios = 0;
+        fallosPrimario = 0;
+        log.info(`[${id}] reintentará el stream principal después de un periodo estable`);
+      }
       programarReinicio();
     });
   }
@@ -65,6 +83,12 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log, spawn
     reiniciar(motivo) {
       if (detenido) return;
       log.warn(`[${id}] reinicio preventivo${motivo ? ": " + motivo : ""}`);
+      if (!usarFallback && rtspFallback && rtspFallback !== rtsp && /sin segmento/i.test(String(motivo || ""))) {
+        usarFallback = true;
+        reinicios = 0;
+        fallosPrimario = 0;
+        log.warn(`[${id}] sin datos en principal; cambia a stream secundario de respaldo`);
+      }
       if (proceso) {
         try { proceso.kill("SIGTERM"); } catch (_) {}
       } else if (!reintento) {
@@ -72,6 +96,7 @@ function crearGrabador({ id, rtsp, carpeta, ffmpeg, segundosSegmento, log, spawn
       }
     },
     grabando() { return !!proceso; },
+    modo() { return usarFallback ? "secundario-respaldo" : "principal"; },
     ultimoArranque() { return ultimoArranque || null; },
   };
 }
