@@ -15,7 +15,7 @@ const { crearSubidor } = require("./subida.js");
 const { pendientes, aRegistro, procesable } = require("./cola.js");
 const { procesarPedido } = require("./procesar.js");
 const { procesarCorte } = require("./procesar-corte.js");
-const { crearPublicadorLive } = require("./live.js");
+const { crearPublicadorLive, rtspSecundario } = require("./live.js");
 
 const VERSION = require("../package.json").version;
 const RAIZ = path.join(__dirname, "..");
@@ -56,7 +56,12 @@ async function main() {
 
   fs.mkdirSync(cfg.carpetaSalida, { recursive: true });
   const grabadores = cfg.camaras.map(c => crearGrabador({
-    id: c.id, rtsp: c.rtsp, ffmpeg: cfg.ffmpeg, segundosSegmento: cfg.segundosSegmento, log,
+    id: c.id,
+    rtsp: c.rtsp,
+    rtspFallback: rtspSecundario(c),
+    ffmpeg: cfg.ffmpeg,
+    segundosSegmento: cfg.segundosSegmento,
+    log,
     carpeta: path.join(cfg.carpetaGrabaciones, c.id),
   }));
   grabadores.forEach(g => g.iniciar());
@@ -163,6 +168,7 @@ async function main() {
           grabando: g.grabando(),
           ultimoSegmento: ultimoSegmento(g.carpeta),
           live: !!(publicadoresLive.find(p => p.id === g.id) || {}).activo?.(),
+          modoGrabacion: g.modo ? g.modo() : "principal",
         })),
       });
     } catch (e) { log.warn("Latido: " + e.message); }
