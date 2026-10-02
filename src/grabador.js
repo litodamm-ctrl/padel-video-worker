@@ -8,7 +8,7 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmento, log, spawnProcess = spawn, schedule = setTimeout, cancel = clearTimeout }) {
-  let proceso = null, detenido = false, reinicios = 0, ultimoArranque = 0, reintento = null;
+  let proceso = null, detenido = false, reinicios = 0, ultimoArranque = 0, reintento = null, pruebaPrimario = null;
   let usarFallback = false, fallosPrimario = 0;
   fs.mkdirSync(carpeta, { recursive: true });
 
@@ -56,6 +56,7 @@ function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmen
           reinicios = 0;
           fallosPrimario = 0;
           log.warn(`[${id}] principal inestable; usando stream secundario como respaldo para no perder grabación`);
+          programarPruebaPrimario();
         }
       } else if (usarFallback && duracion > 10 * 60 * 1000) {
         usarFallback = false;
@@ -65,6 +66,23 @@ function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmen
       }
       programarReinicio();
     });
+  }
+
+  function programarPruebaPrimario() {
+    if (detenido || !usarFallback || !rtspFallback || rtspFallback === rtsp || pruebaPrimario) return;
+    pruebaPrimario = schedule(() => {
+      pruebaPrimario = null;
+      if (detenido || !usarFallback) return;
+      usarFallback = false;
+      reinicios = 0;
+      fallosPrimario = 0;
+      log.info(`[${id}] prueba automática del stream principal`);
+      if (proceso) {
+        try { proceso.kill("SIGTERM"); } catch (_) {}
+      } else if (!reintento) {
+        arrancar();
+      }
+    }, 10 * 60 * 1000);
   }
 
   function programarReinicio() {
@@ -79,7 +97,12 @@ function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmen
   return {
     id, carpeta,
     iniciar: arrancar,
-    detener() { detenido = true; if (reintento) { cancel(reintento); reintento = null; } if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} } },
+    detener() {
+      detenido = true;
+      if (reintento) { cancel(reintento); reintento = null; }
+      if (pruebaPrimario) { cancel(pruebaPrimario); pruebaPrimario = null; }
+      if (proceso) { try { proceso.kill("SIGTERM"); } catch (_) {} }
+    },
     reiniciar(motivo) {
       if (detenido) return;
       log.warn(`[${id}] reinicio preventivo${motivo ? ": " + motivo : ""}`);
@@ -88,6 +111,7 @@ function crearGrabador({ id, rtsp, rtspFallback, carpeta, ffmpeg, segundosSegmen
         reinicios = 0;
         fallosPrimario = 0;
         log.warn(`[${id}] sin datos en principal; cambia a stream secundario de respaldo`);
+        programarPruebaPrimario();
       }
       if (proceso) {
         try { proceso.kill("SIGTERM"); } catch (_) {}
