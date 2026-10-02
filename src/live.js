@@ -25,25 +25,52 @@ function crearPublicadorLive({ cam, ffmpeg, carpeta, subir, log, prefijo }) {
     const entrada = rtspSecundario(cam);
     const playlist = path.join(carpeta, "index.m3u8");
     const segmentos = path.join(carpeta, "seg-%06d.ts");
+
+    // Un reinicio nunca debe mezclar segmentos de codecs distintos en el mismo
+    // playlist. Limpiamos solo los archivos temporales del live.
+    try {
+      for (const n of fs.readdirSync(carpeta)) {
+        if (n === "index.m3u8" || /^seg-\d+\.ts$/i.test(n)) {
+          try { fs.unlinkSync(path.join(carpeta, n)); } catch (_) {}
+        }
+      }
+      vistos.clear();
+    } catch (_) {}
+
     const args = [
       "-hide_banner", "-loglevel", "warning", "-nostats",
       "-rtsp_transport", "tcp",
       "-fflags", "+genpts+discardcorrupt",
       "-i", entrada,
       "-map", "0:v:0", "-map", "0:a?",
-      "-c:v", "copy",
+      // El stream secundario se recodifica a H.264 Baseline + AAC. Así Chrome,
+      // Safari, Edge y móviles pueden reproducirlo aunque la cámara entregue
+      // H.265 o un perfil H.264 no compatible con Media Source Extensions.
+      "-vf", "fps=15",
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-tune", "zerolatency",
+      "-profile:v", "baseline",
+      "-level:v", "3.1",
+      "-pix_fmt", "yuv420p",
+      "-b:v", "900k",
+      "-maxrate", "1100k",
+      "-bufsize", "1800k",
+      "-g", "30",
+      "-keyint_min", "30",
+      "-sc_threshold", "0",
       "-c:a", "aac", "-b:a", "64k", "-ar", "44100",
       "-f", "hls",
-      "-hls_time", "3",
+      "-hls_time", "2",
       "-hls_list_size", "6",
       "-hls_delete_threshold", "3",
-      "-hls_flags", "delete_segments+append_list+omit_endlist+independent_segments+program_date_time",
+      "-hls_flags", "delete_segments+omit_endlist+independent_segments+program_date_time",
       "-hls_segment_filename", segmentos,
       playlist,
     ];
     proceso = spawn(ffmpeg || "ffmpeg", args, { stdio:["ignore","ignore","pipe"], windowsHide:true });
     let err = "";
-    log.info(`[${cam.id}] live iniciado con stream secundario`);
+    log.info(`[${cam.id}] live iniciado · H.264/AAC compatible web`);
     proceso.stderr.on("data", d => { err += d; if (err.length > 5000) err = err.slice(-5000); });
     proceso.on("error", e => {
       log.error(`[${cam.id}] live no pudo iniciar: ${e.message}`);
