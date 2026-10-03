@@ -43,7 +43,7 @@ async function procesarPedido(p, deps) {
     const salida = path.join(salidaDir, p.codigo + ".mp4");
     let ultimo = 10;
     await cortar({
-      archivos: sel.archivos, offset: sel.offset, duracion: sel.duracion, salida, ffmpeg, alto,
+      archivos: sel.archivos, tramos: sel.tramos, offset: sel.offset, duracion: sel.duracion, salida, ffmpeg, alto,
       onProgreso: pct => {
         const a = 10 + Math.round(pct * 0.7);
         if (a - ultimo >= 10) { ultimo = a; marcar({ avance: a }).catch(() => {}); }
