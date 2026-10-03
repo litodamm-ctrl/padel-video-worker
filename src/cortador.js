@@ -74,15 +74,27 @@ function filtroBahia(alto) {
   ].join(",");
 }
 
-async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProgreso }) {
+async function cortar({ archivos, tramos, offset, duracion, salida, ffmpeg, alto, onProgreso }) {
   const bin = ffmpeg || "ffmpeg";
   const lista = salida + ".lista.txt";
-  fs.writeFileSync(lista, archivos.map(a => "file '" + a.replace(/\\/g, "/").replace(/'/g, "'\\''") + "'").join("\n") + "\n");
+  function escRuta(a){ return String(a).replace(/\\/g, "/").replace(/'/g, "'\\''"); }
+  const usarTramos = Array.isArray(tramos) && tramos.length;
+  const lineas = usarTramos
+    ? tramos.flatMap(t => {
+        const l = ["file '" + escRuta(t.ruta) + "'"];
+        if (Number(t.inpoint) > 0.001) l.push("inpoint " + Number(t.inpoint).toFixed(3));
+        if (Number(t.outpoint) > 0.001) l.push("outpoint " + Number(t.outpoint).toFixed(3));
+        return l;
+      })
+    : archivos.map(a => "file '" + escRuta(a) + "'");
+  fs.writeFileSync(lista, lineas.join("\n") + "\n");
   const args = [
     "-y", "-hide_banner", "-loglevel", "error", "-nostats",
     "-fflags", "+genpts+discardcorrupt",
     "-f", "concat", "-safe", "0", "-i", lista,
-    "-ss", String(offset), "-t", String(duracion),
+  ];
+  if (!usarTramos && Number(offset) > 0) args.push("-ss", String(offset));
+  args.push("-t", String(duracion),
     "-map", "0:v:0", "-map", "0:a?",
     "-vf", filtroBahia(alto),
     "-af", "aresample=48000:async=1000:first_pts=0",
@@ -92,8 +104,8 @@ async function cortar({ archivos, offset, duracion, salida, ffmpeg, alto, onProg
     "-avoid_negative_ts", "make_zero",
     "-max_interleave_delta", "0",
     "-movflags", "+faststart",
-    "-progress", "pipe:1", salida,
-  ];
+    "-progress", "pipe:1", salida
+  );
   await new Promise((resolve, reject) => {
     const p = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
     let err = "";
