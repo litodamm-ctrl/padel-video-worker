@@ -13,6 +13,7 @@ function aLocal(fecha, hora) {
 }
 
 function procesable(p, ahora) {
+  if (p && p.reprocesar === true) return true;
   if (p.estado === "programado" || p.estado === "pendiente") return true;
   if (p.estado === "error") return (p.intentos || 0) < MAX_INTENTOS;
   if (p.estado === "procesando") return !!p.tsProceso && (ahora.getTime() - p.tsProceso) > PROCESANDO_CADUCA_MS;
