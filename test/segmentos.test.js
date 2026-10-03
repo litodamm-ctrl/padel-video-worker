@@ -62,3 +62,19 @@ test("seleccionar tolera segmentos con timestamps a pocos segundos del borde", (
   assert.equal(r.parcial, false);
   assert.equal(r.offset, 0);
 });
+
+
+test("seleccionar recorta solapes de reinicios sin alargar el video", () => {
+  const seg = [
+    { ruta: "a", inicio: d(15, 0), duracion: 600 },  // 15:00–15:10
+    { ruta: "b", inicio: d(15, 5), duracion: 600 },  // 15:05–15:15 (solapa 5 min)
+  ];
+  const r = seleccionar(seg, d(15, 0), d(15, 15));
+  assert.equal(r.duracion, 900);
+  assert.equal(r.parcial, false);
+  assert.deepEqual(r.archivos, ["a", "b"]);
+  assert.equal(Math.round(r.tramos[0].inpoint), 0);
+  assert.equal(Math.round(r.tramos[0].outpoint), 600);
+  assert.equal(Math.round(r.tramos[1].inpoint), 300);
+  assert.equal(Math.round(r.tramos[1].outpoint), 600);
+});
