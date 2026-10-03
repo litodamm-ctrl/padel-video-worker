@@ -59,6 +59,7 @@ async function procesarPedido(p, deps) {
       url: res.url, key: res.key,
       duracion: sel.duracion, parcial: sel.parcial, faltanteSeg: sel.faltanteSeg,
       orientacionCorregida: true, marcaClub: true,
+      reprocesar: false, reprocesarMotivo: null,
       tsListo: Date.now(),
     });
     try { borrarLocal(salida); } catch (_) {}
