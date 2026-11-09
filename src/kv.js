@@ -7,9 +7,9 @@ function crearKv({ url, code, fetchImpl }) {
   const f = fetchImpl || globalThis.fetch;
   if (!url || !code) throw new Error("Falta kv.url o kv.code en config.json");
 
-  async function llamar(action, extra) {
+  async function llamar(action, extra, signal) {
     const r = await f(url, {
-      method: "POST",
+      method: "POST", signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(Object.assign({ code, action }, extra || {})),
     });
@@ -48,7 +48,7 @@ function crearKv({ url, code, fetchImpl }) {
         return out;
       }
     },
-    async auth() { return llamar("auth", {}); },
+    async auth() { return llamar("auth", {}, AbortSignal.timeout(15000)); },
   };
 }
 

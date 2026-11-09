@@ -41,14 +41,6 @@ async function main() {
   }
 
   const kv = crearKv(cfg.kv);
-  try {
-    const a = await kv.auth();
-    log.info(`Conectado al manager (modo ${a.modo || "?"})`);
-    if (a.modo === "admin") log.warn("kv.code es el código ADMIN. Usa APP_PEDIDO_CODE.");
-  } catch (e) {
-    log.error("No pude conectar con el manager: " + e.message);
-    process.exit(1);
-  }
 
   let subidor;
   try { subidor = crearSubidor(cfg.r2); }
@@ -85,11 +77,23 @@ async function main() {
     borrarLocal: ruta => { if (cfg.borrarSalidaTrasSubir) fs.unlinkSync(ruta); },
   };
 
-  let ocupado = false, ultimaLimpiezaPedidos = 0, enCola = 0;
+  let ocupado = false, managerValidado = false, ultimaLimpiezaPedidos = 0, enCola = 0;
   async function revisarCola() {
     if (ocupado) return;
     ocupado = true;
     try {
+      // La conexión a Manager controla los pedidos; las cámaras ya graban en el PC.
+      if (!managerValidado) {
+        try {
+          const a = await kv.auth();
+          managerValidado = true;
+          log.info(`Conectado al manager (modo ${a?.modo || "?"})`);
+          if (a?.modo === "admin") log.warn("kv.code es el código ADMIN. Usa APP_PEDIDO_CODE.");
+        } catch (e) {
+          log.warn("No pude conectar con el manager; la grabación local sigue activa. Reintento automático: " + e.message);
+          return;
+        }
+      }
       const items = await kv.listar("pedido:");
       const pedidos = [];
       for (const it of items) {
