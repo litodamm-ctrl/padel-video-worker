@@ -12,7 +12,7 @@ const { crearKv } = require("./kv.js");
 const { crearGrabador, limpiarAntiguos } = require("./grabador.js");
 const { listarSegmentos, cortar, cortarClip, hayFfmpeg } = require("./cortador.js");
 const { crearSubidor } = require("./subida.js");
-const { pendientes, aRegistro, procesable } = require("./cola.js");
+const { pendientes, aRegistro, procesable, crearTurnos, motivoPausa } = require("./cola.js");
 const { procesarPedido } = require("./procesar.js");
 const { procesarCorte } = require("./procesar-corte.js");
 const { crearPublicadorLive, rtspSecundario } = require("./live.js");
@@ -71,15 +71,27 @@ async function main() {
   const deps = {
     kv, log, ffmpeg: cfg.ffmpeg, salidaDir: cfg.carpetaSalida, alto: cfg.alto,
     carpetaDe: court => carpetaDeCancha(cfg, court),
-    listarSegmentos, cortar, cortarClip,
+    listarSegmentos, cortar: opciones => cortar({ ...opciones, limitado: cfg.videosSimultaneos === 2 }), cortarClip,
     subir: (ruta, key, o) => subidor.subir(ruta, key, o),
     descargar: (key, destino) => subidor.descargar(key, destino),
     borrarLocal: ruta => { if (cfg.borrarSalidaTrasSubir) fs.unlinkSync(ruta); },
   };
 
-  let ocupado = false, managerValidado = false, ultimaLimpiezaPedidos = 0, enCola = 0;
+  let ocupado = false, cerrando = false, managerValidado = false, ultimaLimpiezaPedidos = 0, enEspera = 0, pausaCola = null;
+  const turnos = crearTurnos(cfg.videosSimultaneos, e => log.error("Trabajo de video: " + e.message));
+
+  function colaDisponible() {
+    if (cerrando) return false;
+    const motivo = motivoPausa(
+      [discoLibreGB(cfg.carpetaGrabaciones), discoLibreGB(cfg.carpetaSalida)],
+      grabadores.map(g => ultimoSegmento(g.carpeta)), Date.now(), 120000
+    );
+    if (motivo && motivo !== pausaCola) log.warn("Cola en pausa: " + motivo);
+    pausaCola = motivo;
+    return !motivo;
+  }
   async function revisarCola() {
-    if (ocupado) return;
+    if (ocupado || cerrando) return;
     ocupado = true;
     try {
       // La conexión a Manager controla los pedidos; las cámaras ya graban en el PC.
@@ -94,6 +106,8 @@ async function main() {
           return;
         }
       }
+      // Una respuesta iniciada antes de completar un trabajo puede traer su estado anterior.
+      const activosAlLeer = turnos.claves();
       const items = await kv.listar("pedido:");
       const pedidos = [];
       for (const it of items) {
@@ -109,23 +123,32 @@ async function main() {
         pedidos.push(r);
       }
       const lista = pendientes(pedidos, new Date(), cfg.margenMinutos);
-      enCola = lista.length;
-      if (lista.length) log.info(`Cola: ${lista.length} video(s) por hacer`);
-      for (const p of lista) {
-        log.info(`[${p.codigo}] ${p.fecha} ${p.startTime}–${p.endTime} · ${p.court}`);
-        await procesarPedido(p, deps);
+      const videos = lista.filter(p => !activosAlLeer.has("pedido:" + p.codigo) && !turnos.tiene("pedido:" + p.codigo));
+      enEspera = videos.length;
+      if (videos.length && colaDisponible()) {
+        for (const p of videos) {
+          const key = "pedido:" + p.codigo;
+          const recurso = deps.carpetaDe(p.court);
+          if (turnos.iniciar({ key, recurso, exclusivo: !recurso }, () => {
+            log.info(`[${p.codigo}] ${p.fecha} ${p.startTime}–${p.endTime} · ${p.court}`);
+            return procesarPedido(p, deps);
+          })) enEspera--;
+          if (turnos.cantidad() >= cfg.videosSimultaneos) break;
+        }
       }
 
-      /* Los clips usan pedido:clip:* para aprovechar el permiso existente de
-         APP_PEDIDO_CODE sin ampliar los privilegios del worker. */
-      const cortes = await kv.listar(PREFIJO_CORTE);
-      for (const it of cortes) {
+      // Los cortes van solos: pueden compartir la descarga temporal de un partido.
+      const cortes = (await kv.listar(PREFIJO_CORTE)).filter(it => {
         const c = it.value;
-        if (!c || typeof c !== "object") continue;
-        if (["listo", "procesando"].includes(c.estado)) continue;
-        if (c.estado === "error" && (c.intentos || 0) >= 3) continue;
-        enCola += 1;
-        await procesarCorte(it.key, c, deps);
+        return c && typeof c === "object" && !activosAlLeer.has(it.key) && !turnos.tiene(it.key)
+          && !["listo", "procesando"].includes(c.estado)
+          && !(c.estado === "error" && (c.intentos || 0) >= 3);
+      });
+      enEspera += cortes.length;
+      if (!enEspera) pausaCola = null;
+      if (cortes.length && enEspera === cortes.length && !turnos.cantidad() && colaDisponible()) {
+        const it = cortes[0];
+        if (turnos.iniciar({ key: it.key, exclusivo: true }, () => procesarCorte(it.key, it.value, deps))) enEspera--;
       }
 
       if (Date.now() - ultimaLimpiezaPedidos > 86400000) {
@@ -134,7 +157,7 @@ async function main() {
         let n = 0;
         for (const p of pedidos) {
           const ts = p.tsListo || p.tsProceso || p.ts || 0;
-          if (ts && ts < limite && (p.estado === "listo" || p.estado === "error" || p.estado === "cancelado")) {
+          if (!activosAlLeer.has("pedido:" + p.codigo) && !turnos.tiene("pedido:" + p.codigo) && ts && ts < limite && (p.estado === "listo" || p.estado === "error" || p.estado === "cancelado")) {
             try { await kv.del("pedido:" + p.codigo); n++; } catch (_) {}
           }
         }
@@ -156,8 +179,9 @@ async function main() {
       let max = 0;
       for (const n of fs.readdirSync(carpeta)) {
         if (!/\.(mp4|mkv|ts)$/i.test(n)) continue;
-        const m = fs.statSync(path.join(carpeta, n)).mtimeMs;
-        if (m > max) max = m;
+        let f;
+        try { f = fs.statSync(path.join(carpeta, n)); } catch (_) { continue; }
+        if (f.isFile() && f.size > 0 && f.mtimeMs > max) max = f.mtimeMs;
       }
       return max || null;
     } catch (_) { return null; }
@@ -166,7 +190,8 @@ async function main() {
     try {
       await kv.set("worker:heartbeat", {
         ts: Date.now(), version: VERSION, pc: require("os").hostname(),
-        discoLibreGB: discoLibreGB(cfg.carpetaGrabaciones), enCola,
+        discoLibreGB: discoLibreGB(cfg.carpetaGrabaciones),
+        enCola: enEspera + turnos.cantidad(), enProceso: turnos.cantidad(), pausaCola,
         camaras: grabadores.map(g => ({
           id: g.id,
           grabando: g.grabando(),
@@ -214,6 +239,7 @@ async function main() {
   limpiar();
 
   function salir(senal) {
+    cerrando = true;
     log.info(`Recibido ${senal}: deteniendo grabación`);
     grabadores.forEach(g => g.detener());
     publicadoresLive.forEach(p => p.detener());

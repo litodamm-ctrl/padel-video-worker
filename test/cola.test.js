@@ -50,3 +50,37 @@ test("aRegistro completa el pedido con los datos de la reserva video:* cuando fa
   assert.equal(r.endTime, "11:30");
   assert.equal(r.estado, "pendiente");
 });
+
+test("dos cámaras tienen cupos independientes y un fallo libera solo su cupo", async () => {
+  const { crearTurnos } = require("../src/cola.js");
+  const errores = [];
+  let terminarA, fallarB;
+  const a = new Promise(resolve => { terminarA = resolve; });
+  const b = new Promise((_, reject) => { fallarB = reject; });
+  const turnos = crearTurnos(2, e => errores.push(e.message));
+  assert.equal(turnos.iniciar({ key: "A", recurso: "cam1" }, () => a), true);
+  assert.equal(turnos.iniciar({ key: "A", recurso: "cam2" }, () => {}), false);
+  assert.equal(turnos.iniciar({ key: "B", recurso: "cam1" }, () => {}), false);
+  assert.equal(turnos.iniciar({ key: "B", recurso: "cam2" }, () => b), true);
+  assert.equal(turnos.iniciar({ key: "C", recurso: "cam3" }, () => {}), false);
+  const activosAlLeer = turnos.claves();
+  fallarB(new Error("falló subida"));
+  await new Promise(setImmediate);
+  assert.deepEqual(errores, ["falló subida"]);
+  assert.equal(turnos.cantidad(), 1);
+  assert.equal(activosAlLeer.has("B"), true);
+  assert.equal(turnos.tiene("B"), false);
+  assert.equal(turnos.iniciar({ key: "clip", exclusivo: true }, () => {}), false);
+  assert.equal(turnos.iniciar({ key: "C", recurso: "cam2" }, () => {}), true);
+  terminarA();
+  await new Promise(setImmediate);
+  assert.equal(turnos.cantidad(), 0);
+});
+
+test("la cola se protege ante poco espacio o falta de segmentos recientes", () => {
+  const { motivoPausa } = require("../src/cola.js");
+  assert.match(motivoPausa([40, 29], [1000, 1000], 2000, 120000), /espacio/);
+  assert.match(motivoPausa([40, 50], [1000, null], 2000, 120000), /cámara/);
+  assert.match(motivoPausa([40, 50], [1000, 122000], 122000, 120000), /cámara/);
+  assert.equal(motivoPausa([40, 50], [121000, 122000], 122000, 120000), null);
+});

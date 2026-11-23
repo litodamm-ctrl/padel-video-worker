@@ -74,7 +74,7 @@ function filtroBahia(alto) {
   ].join(",");
 }
 
-async function cortar({ archivos, tramos, offset, duracion, salida, ffmpeg, alto, onProgreso }) {
+async function cortar({ archivos, tramos, offset, duracion, salida, ffmpeg, alto, onProgreso, limitado }) {
   const bin = ffmpeg || "ffmpeg";
   const lista = salida + ".lista.txt";
   function escRuta(a){ return String(a).replace(/\\/g, "/").replace(/'/g, "'\\''"); }
@@ -91,6 +91,7 @@ async function cortar({ archivos, tramos, offset, duracion, salida, ffmpeg, alto
   const args = [
     "-y", "-hide_banner", "-loglevel", "error", "-nostats",
     "-fflags", "+genpts+discardcorrupt",
+    ...(limitado ? ["-filter_threads", "1", "-threads:v", "2"] : []),
     "-f", "concat", "-safe", "0", "-i", lista,
   ];
   if (!usarTramos && Number(offset) > 0) args.push("-ss", String(offset));
@@ -99,6 +100,7 @@ async function cortar({ archivos, tramos, offset, duracion, salida, ffmpeg, alto
     "-vf", filtroBahia(alto),
     "-af", "aresample=48000:async=1000:first_pts=0",
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p",
+    ...(limitado ? ["-threads:v", "2"] : []),
     "-fps_mode", "cfr",
     "-c:a", "aac", "-b:a", "128k",
     "-avoid_negative_ts", "make_zero",

@@ -29,6 +29,7 @@
   "retencionHoras": 72,
   "margenMinutos": 3,
   "alto": 720,
+  "videosSimultaneos": 2,
   "intervaloColaSeg": 60,
   "intervaloLatidoSeg": 60,
   "borrarSalidaTrasSubir": true,

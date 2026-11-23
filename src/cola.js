@@ -51,4 +51,23 @@ function aRegistro(codigo, pedido, reserva) {
   return out;
 }
 
-module.exports = { aLocal, pendientes, aRegistro, MAX_INTENTOS, procesable };
+// A job owns its slot and camera until its upload and state writes finish.
+function crearTurnos(max, alFallar) {
+  const activos = new Map();
+  function iniciar(trabajo, ejecutar) {
+    if (activos.size >= max || activos.has(trabajo.key)) return false;
+    if (activos.size && (trabajo.exclusivo || [...activos.values()].some(a => a.exclusivo || a.recurso === trabajo.recurso))) return false;
+    activos.set(trabajo.key, trabajo);
+    Promise.resolve().then(ejecutar).catch(alFallar).finally(() => activos.delete(trabajo.key));
+    return true;
+  }
+  return { iniciar, tiene: key => activos.has(key), claves: () => new Set(activos.keys()), cantidad: () => activos.size };
+}
+
+function motivoPausa(espacios, segmentos, ahora, maxEdadMs) {
+  if (espacios.some(gb => !Number.isFinite(gb) || gb < 30)) return "espacio insuficiente o sin verificar";
+  if (segmentos.some(ms => !Number.isFinite(ms) || ahora - ms > maxEdadMs)) return "cámara sin escritura de video reciente";
+  return null;
+}
+
+module.exports = { aLocal, pendientes, aRegistro, MAX_INTENTOS, procesable, crearTurnos, motivoPausa };

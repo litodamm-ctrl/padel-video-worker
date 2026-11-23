@@ -36,6 +36,7 @@ function cargarConfig(ruta) {
     retencionHoras: cfg.retencionHoras || 72,
     margenMinutos: cfg.margenMinutos == null ? 3 : cfg.margenMinutos,
     alto: cfg.alto || 720,
+    videosSimultaneos: cfg.videosSimultaneos === 1 ? 1 : 2,
     intervaloColaSeg: cfg.intervaloColaSeg || 60,
     intervaloLatidoSeg: cfg.intervaloLatidoSeg || 60,
     borrarSalidaTrasSubir: cfg.borrarSalidaTrasSubir !== false,

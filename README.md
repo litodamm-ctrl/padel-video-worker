@@ -52,6 +52,12 @@ Para quitarlo: `.\desinstalar-tarea.ps1`.
 | `ffmpeg` | `ffmpeg` si está en el PATH, o la ruta completa `C:\\ffmpeg\\bin\\ffmpeg.exe` |
 | `retencionHoras` | Cuántas horas se guardan los segmentos crudos (72 por defecto) |
 | `margenMinutos` | Minutos después del fin de la reserva antes de cortar (3) |
+| `videosSimultaneos` | 2 por defecto; usa 1 para reducir carga. Máximo un partido por cámara. |
+
+El worker revisa la cola cada minuto. Si alguna cámara lleva más de 120 segundos sin escribir un archivo de video no vacío, o alguna unidad de grabaciones o salida baja de 30 GB libres, deja de iniciar trabajos hasta que se recupere. Los clips se procesan de uno en uno cuando no se está armando un partido.
+
+Para actualizar una instalación hecha con Git, espera a que terminen los trabajos en curso. En `C:\padel-worker`, ejecuta `git pull --ff-only origin main` y reinicia solo la instancia existente del worker. Conserva `config.json` y los archivos de grabación. Revisa la versión en el log y verifica que las dos cámaras siguen escribiendo archivos.
+
 
 ### URL RTSP según la marca de la cámara
 
